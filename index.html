@@ -7,80 +7,81 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { background-color: #0f172a; color: white; font-family: sans-serif; overflow: hidden; }
-        canvas { background-color: #1a1a2e; border: 2px solid #334155; border-radius: 8px; }
+        canvas { background-color: #1a1a2e; border: 2px solid #334155; border-radius: 8px; width: 100%; max-width: 800px; }
         .custom-scrollbar::-webkit-scrollbar { width: 6px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
-        input[type="range"] { cursor: pointer; }
+        input[type="range"] { cursor: pointer; width: 100%; }
+        label { display: flex; justify-content: space-between; font-size: 0.75rem; color: #94a3b8; margin-bottom: 2px; }
+        span.val { color: #38bdf8; font-family: monospace; }
     </style>
 </head>
 <body class="flex flex-col h-screen">
 
     <header class="p-4 bg-slate-800 border-b border-slate-700 flex justify-between items-center shadow-md">
-        <h1 class="text-xl font-bold bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent">Frame Data Adjuster</h1>
-        <div class="flex gap-4 text-sm text-slate-400">
-            <span>移動: <kbd class="bg-slate-700 px-1 rounded text-white text-xs">←→</kbd></span>
-            <span>弱: <kbd class="bg-slate-700 px-1 rounded text-white text-xs">Z</kbd> / 強: <kbd class="bg-slate-700 px-1 rounded text-white text-xs">X</kbd></span>
-        </div>
+        <h1 class="text-xl font-bold bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent">Fighting Game Adjuster</h1>
+        <div class="text-xs text-slate-400">移動: 矢印キー / 弱: Z / 強: X</div>
     </header>
 
     <div class="flex flex-1 overflow-hidden">
         <div class="flex-1 p-6 flex flex-col items-center justify-center bg-slate-950 relative">
             <canvas id="gameCanvas" width="800" height="500"></canvas>
-            <div class="absolute top-8 right-8 flex gap-2">
-                <button id="resetBtn" class="p-2 bg-slate-700 hover:bg-slate-600 rounded text-sm">リセット (R)</button>
-                <button id="debugBtn" class="p-2 bg-green-600 hover:bg-green-500 rounded text-sm">当たり判定表示中</button>
+            <div class="mt-4 flex gap-4">
+                <button id="resetBtn" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded text-sm transition">リセット (R)</button>
+                <button id="debugBtn" class="px-4 py-2 bg-green-600 hover:bg-green-500 rounded text-sm transition">当たり判定を表示中</button>
             </div>
         </div>
 
-        <div class="w-96 bg-slate-800 border-l border-slate-700 overflow-y-auto custom-scrollbar p-4 space-y-6">
-            <h2 class="font-bold border-b border-slate-700 pb-2">フレームデータ調整</h2>
+        <div class="w-96 bg-slate-800 border-l border-slate-700 overflow-y-auto custom-scrollbar p-5 space-y-8">
+            <h2 class="font-bold border-b border-slate-600 pb-2 text-lg">調整コンソール</h2>
             
-            <section class="space-y-3">
-                <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest">共通物理</h3>
-                <div class="grid grid-cols-2 gap-4">
+            <section class="space-y-4">
+                <h3 class="text-xs font-black text-slate-500 uppercase tracking-widest">キャラクター物理</h3>
+                <div>
+                    <label>移動速度 <span class="val" id="val-speed">5</span></label>
+                    <input type="range" id="input-speed" min="1" max="15" step="0.5" value="5">
+                </div>
+            </section>
+
+            <section class="p-4 bg-slate-900 rounded-lg border-l-4 border-yellow-500 space-y-4">
+                <h3 class="text-sm font-bold text-yellow-400 flex items-center gap-2">弱攻撃 (Z)</h3>
+                <div class="space-y-3">
                     <div>
-                        <label class="text-[10px] block">移動速度: <span id="val-speed">5</span></label>
-                        <input type="range" id="input-speed" min="1" max="15" step="0.5" value="5" class="w-full accent-blue-500">
+                        <label>発生 (Startup) <span class="val" id="val-l-startup">5</span></label>
+                        <input type="range" id="input-l-startup" min="1" max="30" value="5">
                     </div>
                     <div>
-                        <label class="text-[10px] block">ジャンプ力: <span id="val-jump">15</span></label>
-                        <input type="range" id="input-jump" min="5" max="25" step="1" value="15" class="w-full accent-blue-500">
+                        <label>持続 (Active) <span class="val" id="val-l-active">4</span></label>
+                        <input type="range" id="input-l-active" min="1" max="30" value="4">
+                    </div>
+                    <div>
+                        <label>硬直 (Recovery) <span class="val" id="val-l-recovery">8</span></label>
+                        <input type="range" id="input-l-recovery" min="1" max="60" value="8">
+                    </div>
+                    <div>
+                        <label>リーチ (Reach) <span class="val" id="val-l-reach">40</span></label>
+                        <input type="range" id="input-l-reach" min="0" max="150" value="40">
                     </div>
                 </div>
             </section>
 
-            <section class="p-3 bg-slate-900 rounded border border-yellow-900/30 space-y-4">
-                <h3 class="text-sm font-bold text-yellow-400">弱攻撃 (Z)</h3>
+            <section class="p-4 bg-slate-900 rounded-lg border-l-4 border-red-500 space-y-4">
+                <h3 class="text-sm font-bold text-red-400 flex items-center gap-2">強攻撃 (X)</h3>
                 <div class="space-y-3">
                     <div>
-                        <label class="text-xs block text-slate-400">発生フレーム: <span id="val-l-startup">5</span></label>
-                        <input type="range" id="input-l-startup" min="1" max="20" value="5" class="w-full accent-gray-400">
+                        <label>発生 (Startup) <span class="val" id="val-h-startup">12</span></label>
+                        <input type="range" id="input-h-startup" min="1" max="60" value="12">
                     </div>
                     <div>
-                        <label class="text-xs block text-slate-400">持続フレーム: <span id="val-l-active">4</span></label>
-                        <input type="range" id="input-l-active" min="1" max="20" value="4" class="w-full accent-yellow-500">
+                        <label>持続 (Active) <span class="val" id="val-h-active">6</span></label>
+                        <input type="range" id="input-h-active" min="1" max="60" value="6">
                     </div>
                     <div>
-                        <label class="text-xs block text-slate-400">硬直フレーム: <span id="val-l-recovery">8</span></label>
-                        <input type="range" id="input-l-recovery" min="1" max="40" value="8" class="w-full accent-blue-500">
-                    </div>
-                </div>
-            </section>
-
-            <section class="p-3 bg-slate-900 rounded border border-red-900/30 space-y-4">
-                <h3 class="text-sm font-bold text-red-400">強攻撃 (X)</h3>
-                <div class="space-y-3">
-                    <div>
-                        <label class="text-xs block text-slate-400">発生フレーム: <span id="val-h-startup">12</span></label>
-                        <input type="range" id="input-h-startup" min="1" max="40" value="12" class="w-full accent-gray-400">
+                        <label>硬直 (Recovery) <span class="val" id="val-h-recovery">20</span></label>
+                        <input type="range" id="input-h-recovery" min="1" max="100" value="20">
                     </div>
                     <div>
-                        <label class="text-xs block text-slate-400">持続フレーム: <span id="val-h-active">6</span></label>
-                        <input type="range" id="input-h-active" min="1" max="30" value="6" class="w-full accent-red-500">
-                    </div>
-                    <div>
-                        <label class="text-xs block text-slate-400">硬直フレーム: <span id="val-h-recovery">20</span></label>
-                        <input type="range" id="input-h-recovery" min="1" max="60" value="20" class="w-full accent-blue-500">
+                        <label>リーチ (Reach) <span class="val" id="val-h-reach">50</span></label>
+                        <input type="range" id="input-h-reach" min="0" max="250" value="50">
                     </div>
                 </div>
             </section>
@@ -93,48 +94,48 @@
 
         const config = {
             speed: 5,
-            jumpForce: 15,
             gravity: 0.8,
             moves: {
-                light: { startup: 5, active: 4, recovery: 8, damage: 50, hitstun: 15, width: 70, height: 30, offsetX: 40, offsetY: 20, color: 'rgba(255, 255, 0, 0.7)' },
-                heavy: { startup: 12, active: 6, recovery: 20, damage: 120, hitstun: 25, width: 110, height: 50, offsetX: 50, offsetY: 10, color: 'rgba(255, 0, 0, 0.7)' }
+                light: { startup: 5, active: 4, recovery: 8, damage: 50, hitstun: 15, width: 70, height: 30, offsetX: 40, offsetY: 20, color: 'rgba(255, 255, 0, 0.6)' },
+                heavy: { startup: 12, active: 6, recovery: 20, damage: 120, hitstun: 25, width: 110, height: 50, offsetX: 50, offsetY: 10, color: 'rgba(255, 0, 0, 0.6)' }
             }
         };
+
+        // --- UI Sync Function ---
+        function sync(id, obj, key, valId) {
+            const el = document.getElementById(id);
+            el.oninput = (e) => {
+                const v = Number(e.target.value);
+                obj[key] = v;
+                document.getElementById(valId).innerText = v;
+            };
+        }
+
+        sync('input-speed', config, 'speed', 'val-speed');
+        // Light Attack
+        sync('input-l-startup', config.moves.light, 'startup', 'val-l-startup');
+        sync('input-l-active', config.moves.light, 'active', 'val-l-active');
+        sync('input-l-recovery', config.moves.light, 'recovery', 'val-l-recovery');
+        sync('input-l-reach', config.moves.light, 'offsetX', 'val-l-reach');
+        // Heavy Attack
+        sync('input-h-startup', config.moves.heavy, 'startup', 'val-h-startup');
+        sync('input-h-active', config.moves.heavy, 'active', 'val-h-active');
+        sync('input-h-recovery', config.moves.heavy, 'recovery', 'val-h-recovery');
+        sync('input-h-reach', config.moves.heavy, 'offsetX', 'val-h-reach');
 
         let debugMode = true;
         const keys = {};
         const p1 = { x: 200, y: 400, vx: 0, vy: 0, hp: 1000, dir: 1, state: 'IDLE', timer: 0, move: null, combo: 0, grounded: true };
         const p2 = { x: 600, y: 400, vx: 0, vy: 0, hp: 9999, dir: -1, state: 'IDLE', timer: 0, grounded: true };
 
-        // --- UI Logic ---
-        function bindInput(id, targetObj, key, valId) {
-            document.getElementById(id).oninput = (e) => {
-                const val = Number(e.target.value);
-                targetObj[key] = val;
-                document.getElementById(valId).innerText = val;
-            };
-        }
-
-        bindInput('input-speed', config, 'speed', 'val-speed');
-        bindInput('input-jump', config, 'jumpForce', 'val-jump');
-        
-        // Light Attack Binds
-        bindInput('input-l-startup', config.moves.light, 'startup', 'val-l-startup');
-        bindInput('input-l-active', config.moves.light, 'active', 'val-l-active');
-        bindInput('input-l-recovery', config.moves.light, 'recovery', 'val-l-recovery');
-
-        // Heavy Attack Binds
-        bindInput('input-h-startup', config.moves.heavy, 'startup', 'val-h-startup');
-        bindInput('input-h-active', config.moves.heavy, 'active', 'val-h-active');
-        bindInput('input-h-recovery', config.moves.heavy, 'recovery', 'val-h-recovery');
-
         window.onkeydown = (e) => { keys[e.key] = true; if(e.key === 'r') reset(); };
         window.onkeyup = (e) => keys[e.key] = false;
         document.getElementById('resetBtn').onclick = reset;
-        document.getElementById('debugBtn').onclick = (e) => { 
-            debugMode = !debugMode; 
-            e.target.innerText = debugMode ? "当たり判定表示中" : "当たり判定非表示";
-            e.target.className = debugMode ? "p-2 bg-green-600 rounded text-sm" : "p-2 bg-slate-700 rounded text-sm";
+        document.getElementById('debugBtn').onclick = (e) => {
+            debugMode = !debugMode;
+            e.target.innerText = debugMode ? "当たり判定を表示中" : "当たり判定を非表示";
+            e.target.classList.toggle('bg-green-600');
+            e.target.classList.toggle('bg-slate-700');
         };
 
         function reset() {
@@ -142,55 +143,36 @@
             p2.x = 600; p2.y = 400; p2.state = 'IDLE'; p2.vx = 0; p2.vy = 0;
         }
 
-        function startAttack(p, move, name) {
-            p.state = 'ATTACK_' + name;
-            p.move = JSON.parse(JSON.stringify(move)); // スライダー変更を即反映させるためコピー
-            p.timer = 0;
-        }
-
         function update() {
-            // P1 Logic
             if (p1.state === 'IDLE' || p1.state === 'WALK' || p1.state === 'JUMP') {
                 if (keys['ArrowLeft']) { p1.vx = -config.speed; p1.dir = -1; p1.state = p1.grounded ? 'WALK' : p1.state; }
                 else if (keys['ArrowRight']) { p1.vx = config.speed; p1.dir = 1; p1.state = p1.grounded ? 'WALK' : p1.state; }
                 else { p1.vx = 0; if (p1.grounded) p1.state = 'IDLE'; }
-                if (keys['ArrowUp'] && p1.grounded) { p1.vy = -config.jumpForce; p1.grounded = false; p1.state = 'JUMP'; }
-                if (keys['z']) startAttack(p1, config.moves.light, 'LIGHT');
-                if (keys['x']) startAttack(p1, config.moves.heavy, 'HEAVY');
-            } else if (p1.state.includes('ATTACK')) {
+                if (keys['ArrowUp'] && p1.grounded) { p1.vy = -15; p1.grounded = false; p1.state = 'JUMP'; }
+                if (keys['z']) { p1.state = 'ATTACK_L'; p1.move = {...config.moves.light}; p1.timer = 0; }
+                if (keys['x']) { p1.state = 'ATTACK_H'; p1.move = {...config.moves.heavy}; p1.timer = 0; }
+            } else if (p1.state.startsWith('ATTACK')) {
                 p1.vx = 0; p1.timer++;
                 if (p1.timer > (p1.move.startup + p1.move.active + p1.move.recovery)) { p1.state = 'IDLE'; p1.move = null; }
             } else if (p1.state === 'HIT') {
                 p1.timer--; if (p1.timer <= 0) p1.state = 'IDLE';
             }
 
-            // P2 Logic
-            if (p2.state === 'HIT') {
-                p2.timer--; p2.vx *= 0.95;
-                if (p2.timer <= 0) { p2.state = 'IDLE'; p2.vx = 0; p1.combo = 0; }
-            }
+            if (p2.state === 'HIT') { p2.timer--; p2.vx *= 0.95; if (p2.timer <= 0) { p2.state = 'IDLE'; p1.combo = 0; } }
 
-            applyPhys(p1); applyPhys(p2);
-            checkCollision();
-        }
+            [p1, p2].forEach(p => {
+                p.vy += config.gravity; p.x += p.vx; p.y += p.vy;
+                if (p.y >= 400) { p.y = 400; p.vy = 0; p.grounded = true; }
+                if (p.x < 25) p.x = 25; if (p.x > 775) p.x = 775;
+            });
 
-        function applyPhys(p) {
-            p.vy += config.gravity;
-            p.x += p.vx; p.y += p.vy;
-            if (p.y >= 400) { p.y = 400; p.vy = 0; p.grounded = true; }
-            if (p.x < 25) p.x = 25; if (p.x > 775) p.x = 775;
-        }
-
-        function checkCollision() {
-            if (!p1.state.includes('ATTACK') || !p1.move) return;
-            const m = p1.move;
-            if (p1.timer > m.startup && p1.timer <= (m.startup + m.active)) {
-                const hbX = p1.dir === 1 ? p1.x + m.offsetX : p1.x - m.offsetX - m.width;
-                const hbY = p1.y - m.offsetY - m.height;
-                const p2Rect = { x: p2.x - 25, y: p2.y - 100, w: 50, h: 100 };
-                if (hbX < p2Rect.x + p2Rect.w && hbX + m.width > p2Rect.x && hbY < p2Rect.y + p2Rect.h && hbY + m.height > p2Rect.y) {
-                    if (p2.state !== 'HIT' || p2.timer < m.hitstun - 2) {
-                        p2.state = 'HIT'; p2.timer = m.hitstun; p2.vx = 7 * p1.dir; p2.vy = -2; p2.grounded = false; p1.combo++;
+            if (p1.state.startsWith('ATTACK') && p1.move) {
+                const m = p1.move;
+                if (p1.timer > m.startup && p1.timer <= (m.startup + m.active)) {
+                    const hbX = p1.dir === 1 ? p1.x + m.offsetX : p1.x - m.offsetX - m.width;
+                    const hbY = p1.y - m.offsetY - m.height;
+                    if (hbX < p2.x + 25 && hbX + m.width > p2.x - 25 && hbY < p2.y && hbY + m.height > p2.y - 100) {
+                        if (p2.state !== 'HIT') { p2.state = 'HIT'; p2.timer = m.hitstun; p2.vx = 6 * p1.dir; p2.vy = -2; p1.combo++; }
                     }
                 }
             }
@@ -199,28 +181,31 @@
         function draw() {
             ctx.fillStyle = '#1a1a2e'; ctx.fillRect(0, 0, 800, 500);
             ctx.fillStyle = '#334155'; ctx.fillRect(0, 400, 800, 100);
-            drawChar(p1, '#4cc9f0'); drawChar(p2, '#ff4d6d');
-            ctx.fillStyle = "white"; ctx.font = "16px monospace";
-            ctx.fillText(`P1 State: ${p1.state} (${p1.timer}f)`, 20, 30);
-            ctx.fillText(`Combo: ${p1.combo}`, 20, 55);
-        }
+            
+            // Draw Characters
+            [p1, p2].forEach((p, i) => {
+                ctx.fillStyle = p.state === 'HIT' ? 'white' : (i === 0 ? '#4cc9f0' : '#ff4d6d');
+                ctx.fillRect(p.x - 25, p.y - 100, 50, 100);
+                if (debugMode) { ctx.strokeStyle = '#00ff00'; ctx.strokeRect(p.x - 25, p.y - 100, 50, 100); }
+            });
 
-        function drawChar(p, color) {
-            ctx.fillStyle = p.state === 'HIT' ? 'white' : color;
-            ctx.fillRect(p.x - 25, p.y - 100, 50, 100);
-            if (debugMode) { ctx.strokeStyle = '#00ff00'; ctx.strokeRect(p.x - 25, p.y - 100, 50, 100); }
-            if (p.move && p.timer > p.move.startup && p.timer <= (p.move.startup + p.move.active)) {
-                const m = p.move;
-                const hbX = p.dir === 1 ? p.x + m.offsetX : p.x - m.offsetX - m.width;
-                const hbY = p.y - m.offsetY - m.height;
+            // Draw Hitbox
+            if (p1.move && p1.timer > p1.move.startup && p1.timer <= (p1.move.startup + p1.move.active)) {
+                const m = p1.move;
+                const hbX = p1.dir === 1 ? p1.x + m.offsetX : p1.x - m.offsetX - m.width;
+                const hbY = p1.y - m.offsetY - m.height;
                 ctx.fillStyle = m.color;
                 ctx.fillRect(hbX, hbY, m.width, m.height);
                 if (debugMode) { ctx.strokeStyle = 'red'; ctx.strokeRect(hbX, hbY, m.width, m.height); }
             }
+
+            ctx.fillStyle = "white"; ctx.font = "14px monospace";
+            ctx.fillText(`P1: ${p1.state} | Frame: ${p1.timer}`, 20, 30);
+            ctx.fillText(`Combo: ${p1.combo}`, 20, 50);
         }
 
-        function animate() { update(); draw(); requestAnimationFrame(animate); }
-        animate();
+        function loop() { update(); draw(); requestAnimationFrame(loop); }
+        loop();
     </script>
 </body>
 </html>
