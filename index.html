@@ -1,0 +1,714 @@
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Play, Pause, RotateCcw, Box, Activity, Settings, Code } from 'lucide-react';
+
+/**
+ * Fighting Game Balance Engine
+ * 格闘ゲーム調整シミュレーター
+ * * Core Logic:
+ * - 60FPS Game Loop using requestAnimationFrame
+ * - AABB Collision Detection
+ * - State Machine for Animation Frames (Startup -> Active -> Recovery)
+ */
+
+// --- Constants & Types ---
+const FPS = 60;
+const CANVAS_WIDTH = 800;
+const CANVAS_HEIGHT = 500;
+const GROUND_Y = 400;
+
+type FrameData = {
+  startup: number;
+  active: number;
+  recovery: number;
+  damage: number;
+  hitstun: number;
+  blockstun: number;
+  width: number;
+  height: number;
+  offsetX: number;
+  offsetY: number;
+  color: string;
+};
+
+type CharacterConfig = {
+  name: string;
+  width: number;
+  height: number;
+  speed: number;
+  jumpForce: number;
+  gravity: number;
+  hp: number;
+  moves: {
+    light: FrameData;
+    heavy: FrameData;
+  };
+};
+
+type GameState = {
+  p1: EntityState;
+  p2: EntityState;
+  hitStop: number;
+  debugMode: boolean;
+};
+
+type EntityState = {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  hp: number;
+  direction: 1 | -1; // 1 = right, -1 = left
+  state: 'IDLE' | 'WALK' | 'JUMP' | 'ATTACK_LIGHT' | 'ATTACK_HEAVY' | 'HITSTUN' | 'BLOCKSTUN';
+  frameTimer: number; // Current frame in the animation phase
+  currentMove: FrameData | null;
+  comboCount: number;
+  isGrounded: boolean;
+};
+
+// --- Initial Data ---
+const DEFAULT_CONFIG: CharacterConfig = {
+  name: "Dummy Fighter",
+  width: 50,
+  height: 100,
+  speed: 5,
+  jumpForce: 15,
+  gravity: 0.8,
+  hp: 1000,
+  moves: {
+    light: {
+      startup: 5,
+      active: 4,
+      recovery: 8,
+      damage: 50,
+      hitstun: 15,
+      blockstun: 10,
+      width: 60,
+      height: 30,
+      offsetX: 40,
+      offsetY: 20,
+      color: 'rgba(255, 255, 0, 0.7)' // Yellow
+    },
+    heavy: {
+      startup: 12,
+      active: 6,
+      recovery: 20,
+      damage: 120,
+      hitstun: 25,
+      blockstun: 20,
+      width: 100,
+      height: 50,
+      offsetX: 50,
+      offsetY: 10,
+      color: 'rgba(255, 0, 0, 0.7)' // Red
+    }
+  }
+};
+
+const DEFAULT_P2_CONFIG: CharacterConfig = {
+    ...DEFAULT_CONFIG,
+    name: "Training Bot",
+    hp: 9999, // Sandbag
+};
+
+export default function FightingGameSimulator() {
+  // --- React State for UI ---
+  const [config, setConfig] = useState<CharacterConfig>(DEFAULT_CONFIG);
+  const [isRunning, setIsRunning] = useState(true);
+  const [debugMode, setDebugMode] = useState(true);
+  const [gameInfo, setGameInfo] = useState({ p1Hp: 1000, p2Hp: 9999, combo: 0, status: 'IDLE' });
+
+  // --- Game Engine Refs (Mutable state without re-renders) ---
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const requestRef = useRef<number>();
+  const gameStateRef = useRef<GameState>({
+    p1: {
+      x: 200, y: GROUND_Y, vx: 0, vy: 0, hp: DEFAULT_CONFIG.hp, direction: 1,
+      state: 'IDLE', frameTimer: 0, currentMove: null, comboCount: 0, isGrounded: true
+    },
+    p2: {
+      x: 600, y: GROUND_Y, vx: 0, vy: 0, hp: DEFAULT_P2_CONFIG.hp, direction: -1,
+      state: 'IDLE', frameTimer: 0, currentMove: null, comboCount: 0, isGrounded: true
+    },
+    hitStop: 0,
+    debugMode: true
+  });
+  
+  // Input tracking
+  const keysPressed = useRef<{ [key: string]: boolean }>({});
+
+  // Sync config changes to refs immediately
+  const configRef = useRef(config);
+  useEffect(() => { configRef.current = config; }, [config]);
+
+  // --- Input Handling ---
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => { keysPressed.current[e.key] = true; };
+    const handleKeyUp = (e: KeyboardEvent) => { keysPressed.current[e.key] = false; };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, []);
+
+  // --- Game Loop Logic ---
+  const updatePhysics = (entity: EntityState, cfg: CharacterConfig) => {
+    // Gravity
+    if (!entity.isGrounded) {
+      entity.vy += cfg.gravity;
+    }
+
+    // Apply Velocity
+    entity.x += entity.vx;
+    entity.y += entity.vy;
+
+    // Floor Collision
+    if (entity.y >= GROUND_Y) {
+      entity.y = GROUND_Y;
+      entity.vy = 0;
+      entity.isGrounded = true;
+      // Reset state if landing from jump (simplified)
+      if (entity.state === 'JUMP') entity.state = 'IDLE';
+    } else {
+      entity.isGrounded = false;
+    }
+
+    // Wall Collision
+    if (entity.x < cfg.width / 2) entity.x = cfg.width / 2;
+    if (entity.x > CANVAS_WIDTH - cfg.width / 2) entity.x = CANVAS_WIDTH - cfg.width / 2;
+    
+    // Friction/Stop when idle
+    if (entity.state === 'IDLE' || entity.state === 'HITSTUN') {
+      entity.vx = 0;
+    }
+  };
+
+  const updatePlayer1 = () => {
+    const p1 = gameStateRef.current.p1;
+    const cfg = configRef.current;
+
+    // State Machine Controls
+    if (p1.state === 'IDLE' || p1.state === 'WALK' || p1.state === 'JUMP') {
+      // Movement
+      if (keysPressed.current['ArrowLeft']) {
+        p1.vx = -cfg.speed;
+        p1.direction = -1;
+        if (p1.isGrounded) p1.state = 'WALK';
+      } else if (keysPressed.current['ArrowRight']) {
+        p1.vx = cfg.speed;
+        p1.direction = 1;
+        if (p1.isGrounded) p1.state = 'WALK';
+      } else {
+        p1.vx = 0;
+        if (p1.isGrounded) p1.state = 'IDLE';
+      }
+
+      // Jump
+      if (keysPressed.current['ArrowUp'] && p1.isGrounded) {
+        p1.vy = -cfg.jumpForce;
+        p1.state = 'JUMP';
+        p1.isGrounded = false;
+      }
+
+      // Attacks
+      if (keysPressed.current['z'] && p1.isGrounded) {
+        startAttack(p1, cfg.moves.light, 'ATTACK_LIGHT');
+      } else if (keysPressed.current['x'] && p1.isGrounded) {
+        startAttack(p1, cfg.moves.heavy, 'ATTACK_HEAVY');
+      }
+    } else if (p1.state.startsWith('ATTACK')) {
+      // Attack Logic
+      p1.vx = 0; // Stop moving during attack (simplified)
+      processAttackFrame(p1);
+    } else if (p1.state === 'HITSTUN') {
+      p1.frameTimer--;
+      if (p1.frameTimer <= 0) {
+        p1.state = 'IDLE';
+      }
+    }
+
+    updatePhysics(p1, cfg);
+  };
+
+  const updatePlayer2 = () => {
+    const p2 = gameStateRef.current.p2;
+    // P2 is a dummy, just physics and hitstun
+    if (p2.state === 'HITSTUN') {
+      p2.frameTimer--;
+      // Pushback friction
+      p2.vx *= 0.9;
+      if (p2.frameTimer <= 0) {
+        p2.state = 'IDLE';
+        p2.vx = 0;
+        gameStateRef.current.p1.comboCount = 0; // Reset combo when stun ends
+      }
+    }
+    updatePhysics(p2, DEFAULT_P2_CONFIG);
+  };
+
+  const startAttack = (entity: EntityState, move: FrameData, stateName: any) => {
+    entity.state = stateName;
+    entity.currentMove = move;
+    entity.frameTimer = 0; // Start at frame 0
+  };
+
+  const processAttackFrame = (entity: EntityState) => {
+    if (!entity.currentMove) return;
+    
+    entity.frameTimer++;
+    const { startup, active, recovery } = entity.currentMove;
+    const totalFrames = startup + active + recovery;
+
+    if (entity.frameTimer > totalFrames) {
+      // Move Complete
+      entity.state = 'IDLE';
+      entity.currentMove = null;
+      entity.frameTimer = 0;
+    }
+  };
+
+  const checkCollisions = () => {
+    const { p1, p2 } = gameStateRef.current;
+    
+    // Only check if P1 is active
+    if (!p1.state.startsWith('ATTACK') || !p1.currentMove) return;
+
+    const { startup, active } = p1.currentMove;
+    const isHitting = p1.frameTimer > startup && p1.frameTimer <= (startup + active);
+
+    if (isHitting) {
+      // Calculate Hitbox World Coordinates
+      const hitboxX = p1.direction === 1 
+        ? p1.x + p1.currentMove.offsetX 
+        : p1.x - p1.currentMove.offsetX - p1.currentMove.width;
+      const hitboxY = p1.y - p1.currentMove.offsetY - p1.currentMove.height;
+      
+      const hitbox = { x: hitboxX, y: hitboxY, w: p1.currentMove.width, h: p1.currentMove.height };
+
+      // P2 Hurtbox (Body)
+      const p2Config = DEFAULT_P2_CONFIG;
+      const hurtbox = {
+        x: p2.x - p2Config.width / 2,
+        y: p2.y - p2Config.height,
+        w: p2Config.width,
+        h: p2Config.height
+      };
+
+      // AABB Collision
+      if (
+        hitbox.x < hurtbox.x + hurtbox.w &&
+        hitbox.x + hitbox.w > hurtbox.x &&
+        hitbox.y < hurtbox.y + hurtbox.h &&
+        hitbox.y + hitbox.h > hurtbox.y
+      ) {
+        // HIT!
+        // Simple check to prevent multi-hit in same active frame window (needs more robust ID system usually)
+        // For this sim, we allow re-hitting only if P2 is not already in hitstun from THIS move? 
+        // Simplifying: only hit if P2 is not in initial hitstun frames (very basic)
+        if (p2.state !== 'HITSTUN' || p2.frameTimer < p1.currentMove.hitstun - 2) {
+          applyHit(p2, p1.currentMove, p1.direction);
+        }
+      }
+    }
+  };
+
+  const applyHit = (target: EntityState, move: FrameData, attackerDir: number) => {
+    target.hp -= move.damage;
+    target.state = 'HITSTUN';
+    target.frameTimer = move.hitstun;
+    target.vx = 8 * attackerDir; // Knockback
+    target.vy = -3; // Slight pop up
+    target.isGrounded = false;
+    
+    gameStateRef.current.hitStop = 5; // Frame freeze for impact
+    gameStateRef.current.p1.comboCount++;
+  };
+
+  const gameLoop = useCallback(() => {
+    if (!isRunning) return;
+
+    // Hitstop Logic (Freeze frames)
+    if (gameStateRef.current.hitStop > 0) {
+      gameStateRef.current.hitStop--;
+      draw();
+      requestRef.current = requestAnimationFrame(gameLoop);
+      return;
+    }
+
+    updatePlayer1();
+    updatePlayer2();
+    checkCollisions();
+    draw();
+
+    // Sync info to UI (throttled slightly in real app, but ok here)
+    setGameInfo({
+      p1Hp: gameStateRef.current.p1.hp,
+      p2Hp: gameStateRef.current.p2.hp,
+      combo: gameStateRef.current.p1.comboCount,
+      status: gameStateRef.current.p1.state
+    });
+
+    requestRef.current = requestAnimationFrame(gameLoop);
+  }, [isRunning]); // dependencies
+
+  useEffect(() => {
+    requestRef.current = requestAnimationFrame(gameLoop);
+    return () => cancelAnimationFrame(requestRef.current!);
+  }, [gameLoop]);
+
+  // --- Rendering ---
+  const draw = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const { p1, p2, debugMode } = gameStateRef.current;
+    const p1Cfg = configRef.current;
+    const p2Cfg = DEFAULT_P2_CONFIG;
+
+    // Clear
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+    // Floor
+    ctx.fillStyle = '#333';
+    ctx.fillRect(0, GROUND_Y, CANVAS_WIDTH, CANVAS_HEIGHT - GROUND_Y);
+
+    // Helper: Draw Entity
+    const drawEntity = (entity: EntityState, cfg: CharacterConfig, isP1: boolean) => {
+      // Shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.beginPath();
+      ctx.ellipse(entity.x, GROUND_Y, cfg.width / 2, 10, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Body (Hurtbox)
+      ctx.fillStyle = entity.state === 'HITSTUN' ? '#ffaa00' : (isP1 ? '#4cc9f0' : '#4361ee');
+      if (debugMode) {
+        ctx.strokeStyle = '#00ff00'; // Hurtbox color
+        ctx.lineWidth = 2;
+        ctx.strokeRect(entity.x - cfg.width / 2, entity.y - cfg.height, cfg.width, cfg.height);
+        // Fill with low opacity
+        ctx.globalAlpha = 0.5;
+        ctx.fillRect(entity.x - cfg.width / 2, entity.y - cfg.height, cfg.width, cfg.height);
+        ctx.globalAlpha = 1.0;
+      } else {
+        // Simple sprite rep
+        ctx.fillRect(entity.x - cfg.width / 2, entity.y - cfg.height, cfg.width, cfg.height);
+      }
+
+      // Attack Hitbox
+      if (entity.state.startsWith('ATTACK') && entity.currentMove) {
+        const { startup, active, recovery, width, height, offsetX, offsetY, color } = entity.currentMove;
+        
+        // Color code based on phase
+        let phaseColor = '#fff';
+        let isHitActive = false;
+        
+        if (entity.frameTimer <= startup) phaseColor = '#ffffff'; // Startup (White)
+        else if (entity.frameTimer <= startup + active) {
+          phaseColor = color; // Active (Red/Yellow)
+          isHitActive = true;
+        }
+        else phaseColor = '#0000ff'; // Recovery (Blue)
+
+        // Draw indicator above head
+        ctx.fillStyle = phaseColor;
+        ctx.beginPath();
+        ctx.arc(entity.x, entity.y - cfg.height - 20, 5, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Draw HITBOX
+        if (isHitActive && debugMode) {
+          const hbX = entity.direction === 1 
+            ? entity.x + offsetX 
+            : entity.x - offsetX - width;
+          const hbY = entity.y - offsetY - height;
+
+          ctx.fillStyle = color;
+          ctx.globalAlpha = 0.6;
+          ctx.fillRect(hbX, hbY, width, height);
+          ctx.globalAlpha = 1.0;
+          ctx.strokeStyle = '#ff0000';
+          ctx.strokeRect(hbX, hbY, width, height);
+        }
+      }
+
+      // Direction Indicator
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(entity.x + (entity.direction * 10), entity.y - cfg.height + 10, 4, 4);
+    };
+
+    drawEntity(p1, p1Cfg, true);
+    drawEntity(p2, p2Cfg, false);
+
+    // UI Overlay on Canvas
+    ctx.fillStyle = '#fff';
+    ctx.font = '16px monospace';
+    ctx.fillText(`P1 HP: ${p1.hp}`, 20, 30);
+    ctx.fillText(`COMBO: ${p1.comboCount}`, 20, 50);
+    ctx.fillText(`STATUS: ${p1.state} (${p1.frameTimer})`, 20, 70);
+    
+    if (debugMode) {
+      ctx.fillStyle = '#00ff00';
+      ctx.fillText(`Hurtbox`, p1.x - 20, p1.y + 20);
+      ctx.fillStyle = '#ff0000';
+      ctx.fillText(`Hitbox (Active Only)`, 20, CANVAS_HEIGHT - 20);
+    }
+  };
+
+  // --- Handlers ---
+  const resetGame = () => {
+    gameStateRef.current.p1.x = 200;
+    gameStateRef.current.p1.hp = config.hp;
+    gameStateRef.current.p1.state = 'IDLE';
+    gameStateRef.current.p2.x = 600;
+    gameStateRef.current.p2.hp = DEFAULT_P2_CONFIG.hp;
+    gameStateRef.current.p2.state = 'IDLE';
+    gameStateRef.current.p1.comboCount = 0;
+  };
+
+  const updateMove = (moveType: 'light' | 'heavy', field: keyof FrameData, value: number) => {
+    setConfig(prev => ({
+      ...prev,
+      moves: {
+        ...prev.moves,
+        [moveType]: {
+          ...prev.moves[moveType],
+          [field]: value
+        }
+      }
+    }));
+  };
+
+  const updatePhys = (field: keyof CharacterConfig, value: number) => {
+    setConfig(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  return (
+    <div className="flex flex-col h-screen bg-slate-900 text-white font-sans overflow-hidden">
+      {/* Header */}
+      <header className="p-4 bg-slate-800 border-b border-slate-700 flex justify-between items-center shadow-md">
+        <div className="flex items-center gap-2">
+          <Code className="text-blue-400" />
+          <h1 className="text-xl font-bold bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent">
+            Fighting Game Balance Engine
+          </h1>
+        </div>
+        <div className="flex gap-4 text-sm text-slate-400">
+          <span>Move: <kbd className="bg-slate-700 px-1 rounded text-white">Arrows</kbd></span>
+          <span>Light: <kbd className="bg-slate-700 px-1 rounded text-white">Z</kbd></span>
+          <span>Heavy: <kbd className="bg-slate-700 px-1 rounded text-white">X</kbd></span>
+        </div>
+      </header>
+
+      <div className="flex flex-1 overflow-hidden">
+        {/* Main Canvas Area */}
+        <div className="flex-1 p-6 flex flex-col items-center justify-center bg-slate-950 relative">
+          <canvas
+            ref={canvasRef}
+            width={CANVAS_WIDTH}
+            height={CANVAS_HEIGHT}
+            className="border-2 border-slate-700 rounded shadow-2xl bg-slate-900 w-full max-w-4xl"
+          />
+          
+          <div className="absolute top-8 right-8 flex gap-2">
+            <button
+              onClick={() => setIsRunning(!isRunning)}
+              className="p-2 bg-slate-700 hover:bg-slate-600 rounded-full transition"
+            >
+              {isRunning ? <Pause size={20} /> : <Play size={20} />}
+            </button>
+            <button
+              onClick={resetGame}
+              className="p-2 bg-slate-700 hover:bg-slate-600 rounded-full transition"
+            >
+              <RotateCcw size={20} />
+            </button>
+            <button
+              onClick={() => {
+                setDebugMode(!debugMode);
+                gameStateRef.current.debugMode = !debugMode;
+              }}
+              className={`p-2 rounded-full transition ${debugMode ? 'bg-green-600' : 'bg-slate-700'}`}
+              title="Toggle Hitboxes"
+            >
+              <Box size={20} />
+            </button>
+          </div>
+        </div>
+
+        {/* Right Sidebar: Dev Console */}
+        <div className="w-96 bg-slate-800 border-l border-slate-700 overflow-y-auto custom-scrollbar flex flex-col">
+          <div className="p-4 bg-slate-900 sticky top-0 border-b border-slate-700 z-10 flex items-center gap-2">
+            <Settings size={18} className="text-blue-400" />
+            <h2 className="font-bold">Dev Console (Adjustment)</h2>
+          </div>
+
+          <div className="p-4 space-y-8">
+            {/* Physics Section */}
+            <section>
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                <Activity size={14} /> Character Physics
+              </h3>
+              <div className="space-y-4">
+                <ControlGroup label="Movement Speed">
+                  <input 
+                    type="range" min="1" max="20" step="0.5" 
+                    value={config.speed} 
+                    onChange={(e) => updatePhys('speed', Number(e.target.value))}
+                    className="w-full accent-blue-500"
+                  />
+                  <span className="text-xs font-mono text-blue-300">{config.speed}</span>
+                </ControlGroup>
+                <ControlGroup label="Jump Force">
+                  <input 
+                    type="range" min="5" max="30" step="1" 
+                    value={config.jumpForce} 
+                    onChange={(e) => updatePhys('jumpForce', Number(e.target.value))}
+                    className="w-full accent-blue-500"
+                  />
+                  <span className="text-xs font-mono text-blue-300">{config.jumpForce}</span>
+                </ControlGroup>
+                <ControlGroup label="Gravity">
+                  <input 
+                    type="range" min="0.1" max="2.0" step="0.1" 
+                    value={config.gravity} 
+                    onChange={(e) => updatePhys('gravity', Number(e.target.value))}
+                    className="w-full accent-blue-500"
+                  />
+                  <span className="text-xs font-mono text-blue-300">{config.gravity}</span>
+                </ControlGroup>
+              </div>
+            </section>
+
+            <hr className="border-slate-700" />
+
+            {/* Light Attack Config */}
+            <MoveConfig 
+              title="Light Attack (Z)" 
+              color="text-yellow-400"
+              data={config.moves.light} 
+              onChange={(field, val) => updateMove('light', field, val)} 
+            />
+
+            <hr className="border-slate-700" />
+
+            {/* Heavy Attack Config */}
+            <MoveConfig 
+              title="Heavy Attack (X)" 
+              color="text-red-400"
+              data={config.moves.heavy} 
+              onChange={(field, val) => updateMove('heavy', field, val)} 
+            />
+            
+            <div className="p-4 bg-slate-900 rounded border border-slate-700 mt-4">
+              <h4 className="text-xs text-slate-400 mb-2">Debug Data</h4>
+              <pre className="text-xs text-green-400 font-mono overflow-hidden">
+                {JSON.stringify({ 
+                  state: gameInfo.status, 
+                  activeFrames: config.moves.light.active 
+                }, null, 2)}
+              </pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Subcomponents for UI ---
+
+const ControlGroup = ({ label, children }: { label: string, children: React.ReactNode }) => (
+  <div className="flex flex-col gap-1">
+    <label className="text-xs text-slate-400 font-medium">{label}</label>
+    <div className="flex items-center gap-3">
+      {children}
+    </div>
+  </div>
+);
+
+const MoveConfig = ({ title, color, data, onChange }: { title: string, color: string, data: FrameData, onChange: (f: keyof FrameData, v: number) => void }) => (
+  <section>
+    <h3 className={`text-sm font-bold ${color} mb-4 border-l-2 pl-2 border-current`}>{title}</h3>
+    
+    <div className="grid grid-cols-2 gap-4 mb-4">
+      {/* Frame Data Visualizer */}
+      <div className="col-span-2 bg-slate-900 p-2 rounded flex h-4 w-full overflow-hidden">
+        <div style={{ flex: data.startup, background: '#888' }} title="Startup" />
+        <div style={{ flex: data.active, background: data.color }} title="Active" />
+        <div style={{ flex: data.recovery, background: '#444' }} title="Recovery" />
+      </div>
+      <div className="col-span-2 flex justify-between text-xs text-slate-500 font-mono">
+        <span>S:{data.startup}</span>
+        <span>A:{data.active}</span>
+        <span>R:{data.recovery}</span>
+      </div>
+    </div>
+
+    <div className="space-y-3">
+      <ControlGroup label="Startup Frames (発生)">
+        <input 
+          type="range" min="1" max="30" 
+          value={data.startup} 
+          onChange={(e) => onChange('startup', Number(e.target.value))}
+          className="w-full accent-slate-400"
+        />
+        <span className="text-xs font-mono w-6">{data.startup}</span>
+      </ControlGroup>
+
+      <ControlGroup label="Active Frames (持続)">
+        <input 
+          type="range" min="1" max="30" 
+          value={data.active} 
+          onChange={(e) => onChange('active', Number(e.target.value))}
+          className="w-full accent-red-500"
+        />
+        <span className="text-xs font-mono w-6">{data.active}</span>
+      </ControlGroup>
+
+      <ControlGroup label="Recovery Frames (硬直)">
+        <input 
+          type="range" min="1" max="60" 
+          value={data.recovery} 
+          onChange={(e) => onChange('recovery', Number(e.target.value))}
+          className="w-full accent-blue-500"
+        />
+        <span className="text-xs font-mono w-6">{data.recovery}</span>
+      </ControlGroup>
+
+      <div className="grid grid-cols-2 gap-2 pt-2">
+        <ControlGroup label="Hitbox Width">
+          <input 
+            type="number" className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs"
+            value={data.width} onChange={(e) => onChange('width', Number(e.target.value))}
+          />
+        </ControlGroup>
+        <ControlGroup label="Hitbox Height">
+          <input 
+            type="number" className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs"
+            value={data.height} onChange={(e) => onChange('height', Number(e.target.value))}
+          />
+        </ControlGroup>
+        <ControlGroup label="Offset X (Reach)">
+          <input 
+            type="number" className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs"
+            value={data.offsetX} onChange={(e) => onChange('offsetX', Number(e.target.value))}
+          />
+        </ControlGroup>
+        <ControlGroup label="Damage">
+          <input 
+            type="number" className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-red-300"
+            value={data.damage} onChange={(e) => onChange('damage', Number(e.target.value))}
+          />
+        </ControlGroup>
+      </div>
+    </div>
+  </section>
+);
